@@ -163,6 +163,10 @@ def main():
                     pseudo_newcomer_obs[place].append((h, is_new))
 
     read_horizons = [(parse_iso(r).timestamp() - history_until_sec) / 3600.0 for r in reads]
+    read_h_hours = [max(0.1, (parse_iso(r).timestamp() - history_until_sec) / 3600.0) for r in reads]
+    h_mean = sum(read_h_hours) / len(read_h_hours) if read_h_hours else 0.1
+    w_mc = min(0.85, 0.4 + 0.06 * h_mean)
+    w_pers = 1.0 - w_mc
 
     newcomer_shares = {}
     for place in range(1, 6):
@@ -200,7 +204,7 @@ def main():
     mc_newcomer_counts = {k: 0 for k in range(1, 6)}
 
     for r_idx, read_time in enumerate(reads):
-        h_hours = max(0.1, (read_time.timestamp() - history_until_sec) / 3600.0)
+        h_hours = read_h_hours[r_idx]
 
         for draw in range(n_draws):
             draw_caps = {}
@@ -212,12 +216,12 @@ def main():
                 sampled_cap = rng.gauss(mu, sigma)
                 draw_caps[mint] = sampled_cap
 
-            newcomer_lambda = 8.0 * h_hours
+            newcomer_lambda = min(20.0, 8.0 * h_hours)
             n_newcomers = max(0, min(50, int(rng.gauss(newcomer_lambda, math.sqrt(newcomer_lambda)))))
 
             for i in range(n_newcomers):
                 base_c = rng.choice(young_caps)
-                nc_cap = base_c + rng.gauss(0.2, 0.4) * h_hours
+                nc_cap = base_c + rng.gauss(0.2, 0.4) * (h_hours ** 0.30)
                 nc_mint = f"newcomer_{r_idx}_{draw}_{i}"
                 draw_caps[nc_mint] = nc_cap
 
@@ -261,6 +265,8 @@ def main():
         mc_nu = mc_newcomer_counts[place] / total_mc_place_draws
         est_nu = newcomer_shares[place]
         blended_nu = 0.5 * est_nu + 0.5 * mc_nu
+        blended_nu = min(blended_nu, mc_nu)
+        blended_nu = min(blended_nu, 0.55)
         effective_newcomer_shares[place] = max(0.15, min(0.65, blended_nu))
 
     # Determine global top5 across reads (stably sorted by score, mint)
@@ -313,7 +319,7 @@ def main():
             if is_short_history:
                 p_val = pers_p if pers_p > 0 else mc_p
             else:
-                p_val = 0.4 * mc_p + 0.6 * pers_p
+                p_val = w_mc * mc_p + w_pers * pers_p
             if p_val >= 0.0001:
                 place_rows_map[mint] = p_val
 
